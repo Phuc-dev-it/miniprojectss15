@@ -55,7 +55,7 @@ CREATE TABLE likes (
 );
 
 USE SocialNetworkDB;
-select * FROM users;
+
 INSERT INTO users (username, password, email) VALUES
 ('an_nguyen', 'matkhau123', 'an@gmail.com'),
 ('binh_tran', 'binh456', 'binh@gmail.com'),
@@ -69,7 +69,7 @@ INSERT INTO posts (user_id, content, like_count, comment_count) VALUES
 (3, 'Code frontend xong muốn đi ngủ luôn.', 1, 1),
 (4, 'Vừa hoàn thành project backend đầu tiên.', 2, 0),
 (5, 'Cố gắng học fullstack mỗi ngày.', 1, 1);
-SELECT * FROM posts; 
+
 -- COMMENTS
 INSERT INTO comments (post_id, user_id, content) VALUES
 (1, 2, 'Đi cà phê nhớ rủ nha.'),
@@ -163,7 +163,6 @@ DELIMITER ;
 -- Like bài viết
 INSERT INTO likes(user_id, post_id)
 VALUES (1,3);
-SELECT * FROM likes;
 
 -- Hủy like
 DELETE FROM likes
@@ -207,58 +206,30 @@ INSERT INTO friends(user_id, friend_id, status)
 VALUES (5,2,'pending');
 
 -- F05
-DROP PROCEDURE IF EXISTS manage_friendship;
-
 DELIMITER $$
-
 CREATE PROCEDURE manage_friendship(
     IN p_user_id INT,
     IN p_friend_id INT,
     IN p_action VARCHAR(20)
 )
 BEGIN
-    IF p_action = 'accepted' THEN
-
-        UPDATE friends
-        SET status = 'accepted'
+	IF p_action = 'accept' THEN
+		UPDATE friends
+        SET status = 'accpept'
         WHERE 
-            (
-                user_id = p_user_id 
-                AND friend_id = p_friend_id
-                AND status = 'pending'
-            )
+			(user_id = p_user_id AND friend_id = p_friend_id)
             OR
-            (
-                user_id = p_friend_id 
-                AND friend_id = p_user_id
-                AND status = 'pending'
-            );
-
-    ELSEIF p_action = 'cancelled' THEN
-
+            (user_id = p_friend_id AND friend_id = p_user_id);
+	ELSEIF p_action = 'cancel' THEN
         DELETE FROM friends
         WHERE 
             (user_id = p_user_id AND friend_id = p_friend_id)
             OR
             (user_id = p_friend_id AND friend_id = p_user_id);
-
-    ELSE
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Hành động không hợp lệ';
     END IF;
 END $$
-
 DELIMITER ;
 
-SELECT * FROM friends;
-
-CALL manage_friendship(2, 5, 'accepted');
-
-SELECT * FROM friends;
-
-CALL manage_friendship(2, 5, 'cancelled');
-
-SELECT * FROM friends;
 -- F06
 CREATE VIEW user_profile_view AS
 SELECT 
@@ -278,7 +249,7 @@ GROUP BY
     u.email,
     u.created_at;
     
-SELECT * FROM user_profile_view;
+    
 -- F07
 DELIMITER $$
 
@@ -292,7 +263,7 @@ BEGIN
 END $$
 
 DELIMITER ;
-CALL search_posts ('fullstack');
+
 
 -- F08
 DELIMITER $$
@@ -310,7 +281,7 @@ BEGIN
 END $$
 
 DELIMITER ;
-CALL report_user_activity (2);
+
 -- F09: Friend suggestion using CTE
 DELIMITER //
 CREATE PROCEDURE sp_suggest_friends(
@@ -356,8 +327,6 @@ BEGIN
     ORDER BY mutual_friend_count DESC, u.username ASC;
 END //
 DELIMITER ;
-
-CALL sp_suggest_friends (2);
 -- F10:
 DELIMITER // 
 
@@ -405,76 +374,58 @@ BEGIN
 END// 
 
 DELIMITER ;
-INSERT INTO posts (user_id, content, like_count, comment_count) VALUES
-(2, 'Bau troi moi', 6, 3);
-CALL DeletePost (8, 3); -- Bai viet khong tồn tại
-CALL DeletePost (6, 3); -- Không có quyền xóa bài viết
-CALL DeletePost (6, 2); -- Xóa hợp lệ
-SELECT * FROM posts;
+
 
 -- F11
 DROP PROCEDURE IF EXISTS delete_user;
-
 DELIMITER //
-
-CREATE PROCEDURE delete_user(IN p_user_id INT)
+CREATE PROCEDURE delete_user (p_user_id INT)
 BEGIN
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+	DECLARE EXIT HANDLER FOR SQLEXCEPTION 
     BEGIN
-        DROP TEMPORARY TABLE IF EXISTS temp_user_posts;
-        ROLLBACK;
+		ROLLBACK;
         RESIGNAL;
     END;
-
+	SET SQL_SAFE_UPDATES = 0;
     START TRANSACTION;
-
-    IF NOT EXISTS (SELECT 1 FROM users WHERE user_id = p_user_id) THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'User không tồn tại';
-    END IF;
-
-    DROP TEMPORARY TABLE IF EXISTS temp_user_posts;
-
-    CREATE TEMPORARY TABLE temp_user_posts (
-        post_id INT PRIMARY KEY
-    );
-
-    INSERT INTO temp_user_posts(post_id)
-    SELECT post_id
-    FROM posts
-    WHERE user_id = p_user_id;
-
+    
+	IF (SELECT 1 FROM users WHERE user_id = p_user_id) IS NULL THEN
+		SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'User không tồn tại';
+	END IF;
+    
     DELETE FROM friends
     WHERE user_id = p_user_id OR friend_id = p_user_id;
 
+    -- Delete user's likes
     DELETE FROM likes
     WHERE user_id = p_user_id;
 
+    -- Delete user's comments on other posts
     DELETE FROM comments
     WHERE user_id = p_user_id;
 
-    DELETE FROM likes
-    WHERE post_id IN (
-        SELECT post_id FROM temp_user_posts
-    );
+    -- Delete likes/comments belonging to user's posts before deleting posts
+    DELETE l
+    FROM likes l
+    JOIN posts p ON p.post_id = l.post_id
+    WHERE p.user_id = p_user_id;
 
-    DELETE FROM comments
-    WHERE post_id IN (
-        SELECT post_id FROM temp_user_posts
-    );
+    DELETE c
+    FROM comments c
+    JOIN posts p ON p.post_id = c.post_id
+    WHERE p.user_id = p_user_id;
 
+    -- Delete user's posts
     DELETE FROM posts
     WHERE user_id = p_user_id;
 
+    -- Delete user
     DELETE FROM users
     WHERE user_id = p_user_id;
-
-    DROP TEMPORARY TABLE IF EXISTS temp_user_posts;
-
+	SELECT 'Xóa người dùng thành công' AS message;
+    
     COMMIT;
 
-    SELECT 'Xóa người dùng thành công' AS message;
 END //
-
 DELIMITER ;
-CALL delete_user(2);
+CALL delete_user (1);
